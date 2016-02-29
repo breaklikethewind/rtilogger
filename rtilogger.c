@@ -164,17 +164,18 @@ void write_queue_to_file(void)
 	struct queue_entry_t* queue_stale;
 
 	// Fetch file queue data
-	pthread_mutex_lock(&lock);		
 	while (queue_head)
 	{
+		pthread_mutex_lock(&lock);
 		write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
 		queue_stale = queue_head;
 		queue_head = queue_head->next;
 		free(queue_stale);
 		if (queue_head == NULL)
 			queue_tail = NULL;
+		pthread_mutex_unlock(&lock);	
+		sleep(0);
 	}
-	pthread_mutex_unlock(&lock);
 }
 
 void *thread_write_file( void *ptr ) 
