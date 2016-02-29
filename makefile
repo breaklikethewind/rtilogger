@@ -1,7 +1,7 @@
 
-CC=gcc
+CC=/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-gcc
 CFLAGS=-c -Wall
-LDFLAGS=-lwiringPi -lpthread
+LDFLAGS=-lpthread
 SOURCES=rtilogger.c transport.c 
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=rtilogger

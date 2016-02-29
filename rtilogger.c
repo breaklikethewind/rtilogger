@@ -58,18 +58,20 @@ typedef struct
 	char filename_txt[256];
 } status_t;
 
-typedef struct
+struct queue_entry_t
 {
 	char buf[256];
-	queue_entry_t* next;
-} queue_entry_t;
+	struct queue_entry_t* next;
+};
 
-queue_entry_t* queue_tail;
-queue_entry_t* queue_head;
+struct queue_entry_t* queue_tail;
+struct queue_entry_t* queue_head;
 status_t status;
 int exitflag = 0;
 pthread_mutex_t lock; // sync between UDP thread and main
 commandlist_t command_list;
+
+void write_queue_to_file(void);
 void *thread_write_file( void *ptr );
 
 typedef int (*cmdfunc)(char* request, char* response);
@@ -106,6 +108,7 @@ int opentxtfile(char* request, char* response)
 
 int closetxtfile(char* request, char* response)
 {
+	write_queue_to_file(); // flush the queue
 	close(status.file_txt_desc);
 	status.file_txt_desc = 0;
 	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); // I know, this will always be 0
@@ -117,6 +120,7 @@ int logtxt(char* request, char* response)
 {
 	time_t t;
 	struct tm tm;
+	char time_s[25];
 	
 	t = time(NULL);
 	tm = *localtime(&t);
@@ -128,18 +132,16 @@ int logtxt(char* request, char* response)
 		pthread_mutex_lock(&lock);
 		if (queue_tail)
 		{
-			queue_tail->next = malloc(sizeof(queue_entry_t));
+			queue_tail->next = malloc(sizeof(struct queue_entry_t));
 			queue_tail = queue_tail->next;
-			queue_tail->next = NULL;
-			sprintf(queue_tail->buf, "%s: %s", time_s, request);
 		}
 		else
 		{
-			queue_tail = malloc(sizeof(queue_entry_t));
+			queue_tail = malloc(sizeof(struct queue_entry_t));
 			queue_head = queue_tail;
-			queue_tail->next = NULL;
-			sprintf(queue_tail->buf, "%s: %s", time_s, request);
 		}
+		queue_tail->next = NULL;
+		sprintf(queue_tail->buf, "%s: %s", time_s, request);
 		pthread_mutex_unlock(&lock);
 	}
 	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); 
@@ -157,28 +159,30 @@ int app_exit(char* request, char* response)
 	return 0;
 }
 
+void write_queue_to_file(void)
+{
+	struct queue_entry_t* queue_stale;
+
+	// Fetch file queue data
+	pthread_mutex_lock(&lock);		
+	while (queue_head)
+	{
+		write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
+		queue_stale = queue_head;
+		queue_head = queue_head->next;
+		free(queue_stale);
+		if (queue_head == NULL)
+			queue_tail = NULL;
+	}
+	pthread_mutex_unlock(&lock);
+}
+
 void *thread_write_file( void *ptr ) 
 {
-	queue_entry_t queue_stale;
 	
 	while (!exitflag)
 	{
-		// Fetch file queue data
-		pthread_mutex_lock(&lock);		
-		while (queue_head)
-		{
-			write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
-			queue_stale = queue_head;
-			queue_head = queue_head->next;
-			free(queue_stale);
-			if (queue_stale == queue_tail)
-			{
-				queue_head = NULL;
-				queue_tail = NULL;
-			}
-		}
-		pthread_mutex_unlock(&lock);
-		
+		write_queue_to_file();
 		sleep(WRITEOUT_PERIOD);
 	}
 	
