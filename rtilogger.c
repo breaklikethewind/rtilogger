@@ -58,7 +58,7 @@ typedef struct
 {
 	int file_idx_txt;
 	int file_txt_desc;
-	char filename_txt[256];
+	char filename_txt[1024];
 } status_t;
 
 struct msg_queue_st {
@@ -189,13 +189,19 @@ void *thread_write_file( void *ptr )
  *********************************************************************************
  */
 
-int  main(void)
+int  main(int argc, char *argv[])
 {
 	int  iret1;
 	int broadcast;
 	pthread_t write_file_thread_handle;
 	int msgqkey = MSG_QUEUE_KEY;
 
+	if (argc < 2)
+	{
+		printf("Must enter text log file name!\n");
+		return -1;
+	}
+	
 	printf("RTILogger Launch...\r\n");
 
 	/* Set up the socket */
@@ -210,7 +216,8 @@ int  main(void)
 
 	// Initialize sensors
 	status.file_idx_txt = 0;
-	strcpy(status.filename_txt, FILE_NAME_TXT);
+	   
+	strcpy(status.filename_txt, argv[1]);
 	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_APPEND | O_WRONLY, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH);
 	if (status.file_txt_desc < 0)
 	{
