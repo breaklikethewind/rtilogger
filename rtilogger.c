@@ -73,14 +73,15 @@ int exitflag = 0;
 pthread_mutex_t lock; // sync between UDP thread and main
 commandlist_t command_list;
 
-void write_queue_to_file(void);
 void *thread_write_file( void *ptr );
 
 typedef int (*cmdfunc)(char* request, char* response);
 
-int opentxtfile(char* request, char* response);
-int closetxtfile(char* request, char* response);
-int logtxt(char* request, char* response);
+int logtxtsecurity(char* request, char* response);
+int logtxtwx(char* request, char* response);
+int logtxtclimate(char* request, char* response);
+int logtxtstatus(char* request, char* response);
+int logtxt(char* type, char* request, char* response);
 int app_exit(char* request, char* response);
 
 pushlist_t pushlist[] = { 
@@ -89,13 +90,36 @@ pushlist_t pushlist[] = {
 };
 
 commandlist_t device_commandlist[] = { 
-{ "LOGTXT",          "LOGTXTIDX",    &logtxt,       TYPE_INTEGER, &status.file_idx_txt},
-{ "GETTXTIDX",       "LOGTXTIDX",    NULL,          TYPE_INTEGER, &status.file_idx_txt},
-{ "EXIT",            "EXIT",         &app_exit,     TYPE_INTEGER, &exitflag},
-{ "",                "",             NULL,          TYPE_NULL,    NULL}
+{ "LOGTXTSECURITY",  "LOGTXTIDX",    &logtxtsecurity, TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTWX",        "LOGTXTIDX",    &logtxtwx,       TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTCLIMATE",   "LOGTXTIDX",    &logtxtclimate,  TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTSTATUS",    "LOGTXTIDX",    &logtxtstatus,   TYPE_INTEGER, &status.file_idx_txt},
+{ "GETTXTIDX",       "LOGTXTIDX",    NULL,            TYPE_INTEGER, &status.file_idx_txt},
+{ "EXIT",            "EXIT",         &app_exit,       TYPE_INTEGER, &exitflag},
+{ "",                "",             NULL,            TYPE_NULL,    NULL}
 };
 
-int logtxt(char* request, char* response)
+int logtxtsecurity(char* request, char* response)
+{
+	return logtxt("Security", request, response);
+}
+
+int logtxtwx(char* request, char* response)
+{
+	return logtxt("Weather", request, response);
+}
+
+int logtxtclimate(char* request, char* response)
+{
+	return logtxt("Climate", request, response);
+}
+
+int logtxtstatus(char* request, char* response)
+{
+	return logtxt("Status", request, response);
+}
+
+int logtxt(char* type, char* request, char* response)
 {
 	time_t t;
 	struct tm tm;
@@ -106,14 +130,14 @@ int logtxt(char* request, char* response)
 	t = time(NULL);
 	tm = *localtime(&t);
 
-	sprintf(time_s, "%d-%d-%d %d:%d:%d\n", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(time_s, "%02d-%02d-%04d | %02d:%02d:%02d", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	if (status.file_txt_desc) 
 	{		
-		sprintf(msgq.msg, "%s: %s", time_s, request);
+		sprintf(msgq.msg, "%05u | %s | %8s | %s \n", status.file_idx_txt, time_s, type, request);
 		if (msgsnd(msgqid, (void *)&msgq, strlen(msgq.msg) + 1 , 0) == -1) 
 		{
-		    fprintf(stderr, "msgsnd failed\n");
+		    printf("msgsnd failed\n");
 		    error = -1;
 		}		
 	
@@ -121,7 +145,7 @@ int logtxt(char* request, char* response)
 		status.file_idx_txt++;
 		pthread_mutex_unlock(&lock);
 	}
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); 
+	sprintf(response, "%u", status.file_idx_txt); 
 	
 	return error;
 }
@@ -184,7 +208,7 @@ int  main(void)
 
 	// Initialize sensors
 	strcpy(status.filename_txt, FILE_NAME_TXT);
-	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_WRONLY, S_IWUSR);
+	status.file_txt_desc = open(status.filename_txt, O_APPEND | O_WRONLY, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH);
 	status.file_idx_txt = 0;
 	
 	// Initialize message queue
