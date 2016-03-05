@@ -61,6 +61,7 @@ typedef struct
 	char filename_txt[256];
 } status_t;
 
+<<<<<<< HEAD
 struct msg_queue_st {
     long int msg_type;
     char msg[MAX_LOGMSG_BYTES];
@@ -68,10 +69,22 @@ struct msg_queue_st {
 
 int msgqid;
 
+=======
+struct queue_entry_t
+{
+	char buf[256];
+	struct queue_entry_t* next;
+};
+
+struct queue_entry_t* queue_tail;
+struct queue_entry_t* queue_head;
+>>>>>>> 80295ea511924c7d4dcd6479b65fcc00a124d4c6
 status_t status;
 int exitflag = 0;
 pthread_mutex_t lock; // sync between UDP thread and main
 commandlist_t command_list;
+
+void write_queue_to_file(void);
 void *thread_write_file( void *ptr );
 
 typedef int (*cmdfunc)(char* request, char* response);
@@ -93,12 +106,38 @@ commandlist_t device_commandlist[] = {
 { "",                "",             NULL,          TYPE_NULL,    NULL}
 };
 
+<<<<<<< HEAD
+=======
+int opentxtfile(char* request, char* response)
+{
+	strncpy(status.filename_txt, request, 255);
+	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_WRONLY, S_IWUSR);
+	
+	sprintf(response, "%u", (status.file_txt_desc) ? 1:0);
+	
+	return 0;
+}
+
+int closetxtfile(char* request, char* response)
+{
+	write_queue_to_file(); // flush the queue
+	close(status.file_txt_desc);
+	status.file_txt_desc = 0;
+	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); // I know, this will always be 0
+	
+	return 0;
+}
+
+>>>>>>> 80295ea511924c7d4dcd6479b65fcc00a124d4c6
 int logtxt(char* request, char* response)
 {
 	time_t t;
 	struct tm tm;
+<<<<<<< HEAD
 	struct msg_queue_st msgq;
 	int error = 0;
+=======
+>>>>>>> 80295ea511924c7d4dcd6479b65fcc00a124d4c6
 	char time_s[25];
 	
 	t = time(NULL);
@@ -111,12 +150,25 @@ int logtxt(char* request, char* response)
 		sprintf(msgq.msg, "%s: %s", time_s, request);
 		if (msgsnd(msgqid, (void *)&msgq, strlen(msgq.msg) + 1 , 0) == -1) 
 		{
+<<<<<<< HEAD
 		    fprintf(stderr, "msgsnd failed\n");
 		    error = -1;
 		}		
 	
 		pthread_mutex_lock(&lock);
 		status.file_idx_txt++;
+=======
+			queue_tail->next = malloc(sizeof(struct queue_entry_t));
+			queue_tail = queue_tail->next;
+		}
+		else
+		{
+			queue_tail = malloc(sizeof(struct queue_entry_t));
+			queue_head = queue_tail;
+		}
+		queue_tail->next = NULL;
+		sprintf(queue_tail->buf, "%s: %s", time_s, request);
+>>>>>>> 80295ea511924c7d4dcd6479b65fcc00a124d4c6
 		pthread_mutex_unlock(&lock);
 	}
 	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); 
@@ -134,8 +186,28 @@ int app_exit(char* request, char* response)
 	return 0;
 }
 
+void write_queue_to_file(void)
+{
+	struct queue_entry_t* queue_stale;
+
+	// Fetch file queue data
+	while (queue_head)
+	{
+		pthread_mutex_lock(&lock);
+		write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
+		queue_stale = queue_head;
+		queue_head = queue_head->next;
+		free(queue_stale);
+		if (queue_head == NULL)
+			queue_tail = NULL;
+		pthread_mutex_unlock(&lock);	
+		sleep(0);
+	}
+}
+
 void *thread_write_file( void *ptr ) 
 {
+<<<<<<< HEAD
 	struct msg_queue_st msgq;
 	long int msg_to_receive = 0;
 	
@@ -150,6 +222,13 @@ void *thread_write_file( void *ptr )
 			    strerror(errno));
 			exit(EXIT_FAILURE);
 		}
+=======
+	
+	while (!exitflag)
+	{
+		write_queue_to_file();
+		sleep(WRITEOUT_PERIOD);
+>>>>>>> 80295ea511924c7d4dcd6479b65fcc00a124d4c6
 	}
 	
 	return NULL;
