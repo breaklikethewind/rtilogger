@@ -37,35 +37,37 @@
 #include <signal.h>
 
 #include <sys/socket.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <netinet/in.h>
 
 #include "transport.h"
 
-#define WRITEOUT_PERIOD 5 // Seconds
+/* This is unique per application instance and RTI driver instance */
+#define RTI_UDP_PORT 32004
+#define MAX_LOGMSG_BYTES 256
+#define FILE_NAME_TXT "RTI_Logfile.txt"
+#define MSG_QUEUE_KEY 1
 
 struct sockaddr_in servaddr;
 
 int sockfd;
 int rtiUdpPort;
-/* This is unique per application instance and RTI driver instance */
-#define RTI_UDP_PORT 32004
 
 typedef struct
 {
-	int file_open_txt;
 	int file_idx_txt;
 	int file_txt_desc;
 	char filename_txt[256];
 } status_t;
 
-typedef struct
-{
-	char buf[256];
-	queue_entry_t* next;
-} queue_entry_t;
+struct msg_queue_st {
+    long int msg_type;
+    char msg[MAX_LOGMSG_BYTES];
+}; 
 
-queue_entry_t* queue_tail;
-queue_entry_t* queue_head;
+int msgqid;
+
 status_t status;
 int exitflag = 0;
 pthread_mutex_t lock; // sync between UDP thread and main
@@ -80,43 +82,24 @@ int logtxt(char* request, char* response);
 int app_exit(char* request, char* response);
 
 pushlist_t pushlist[] = { 
-{ "TXTFILEOPEN",  TYPE_FLOAT,   &status.file_open_txt}, 
-{ "LOGTXT",       TYPE_FLOAT,   &status.file_idx_txt},
+{ "LOGTXTIDX",    TYPE_FLOAT,   &status.file_idx_txt},
 { "",             TYPE_NULL,    NULL} 
 };
 
 commandlist_t device_commandlist[] = { 
-{ "OPENTXTFILE",     "TXTFILEOPEN",  &opentxtfile,  TYPE_FLOAT,   NULL}, 
-{ "CLOSETXTFILE",    "TXTFILEOPEN",  &closetxtfile, TYPE_FLOAT,   NULL}, 
-{ "LOGTXT",          "LOGTXT",       &logtxt,       TYPE_FLOAT,   &status.file_idx_txt},
-{ "GETIDXTXT",       "IDXTXT",       NULL,          TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXT",          "LOGTXTIDX",    &logtxt,       TYPE_FLOAT,   &status.file_idx_txt},
+{ "GETTXTIDX",       "LOGTXTIDX",    NULL,          TYPE_INTEGER, &status.file_idx_txt},
 { "EXIT",            "EXIT",         &app_exit,     TYPE_INTEGER, &exitflag},
 { "",                "",             NULL,          TYPE_NULL,    NULL}
 };
-
-int opentxtfile(char* request, char* response)
-{
-	strncpy(status.filename_txt, request, 255);
-	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_WRONLY, S_IWUSR);
-	
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0);
-	
-	return 0;
-}
-
-int closetxtfile(char* request, char* response)
-{
-	close(status.file_txt_desc);
-	status.file_txt_desc = 0;
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); // I know, this will always be 0
-	
-	return 0;
-}
 
 int logtxt(char* request, char* response)
 {
 	time_t t;
 	struct tm tm;
+	struct msg_queue_st msgq;
+	int error = 0;
+	char time_s[25];
 	
 	t = time(NULL);
 	tm = *localtime(&t);
@@ -124,27 +107,21 @@ int logtxt(char* request, char* response)
 	sprintf(time_s, "%d-%d-%d %d:%d:%d\n", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	if (status.file_txt_desc) 
-	{
+	{		
+		sprintf(msgq.msg, "%s: %s", time_s, request);
+		if (msgsnd(msgqid, (void *)&msgq, strlen(msgq.msg) + 1 , 0) == -1) 
+		{
+		    fprintf(stderr, "msgsnd failed\n");
+		    error = -1;
+		}		
+	
 		pthread_mutex_lock(&lock);
-		if (queue_tail)
-		{
-			queue_tail->next = malloc(sizeof(queue_entry_t));
-			queue_tail = queue_tail->next;
-			queue_tail->next = NULL;
-			sprintf(queue_tail->buf, "%s: %s", time_s, request);
-		}
-		else
-		{
-			queue_tail = malloc(sizeof(queue_entry_t));
-			queue_head = queue_tail;
-			queue_tail->next = NULL;
-			sprintf(queue_tail->buf, "%s: %s", time_s, request);
-		}
+		status.file_idx_txt++;
 		pthread_mutex_unlock(&lock);
 	}
 	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); 
 	
-	return 0;
+	return error;
 }
 
 int app_exit(char* request, char* response)
@@ -159,27 +136,20 @@ int app_exit(char* request, char* response)
 
 void *thread_write_file( void *ptr ) 
 {
-	queue_entry_t queue_stale;
+	struct msg_queue_st msgq;
+	long int msg_to_receive = 0;
 	
 	while (!exitflag)
 	{
-		// Fetch file queue data
-		pthread_mutex_lock(&lock);		
-		while (queue_head)
+		// Fetch file queue data (blocking)
+		if (msgrcv(msgqid, (void *)&msgq, MAX_LOGMSG_BYTES, msg_to_receive, 0) != -1) 
+			write(status.file_txt_desc, msgq.msg, strlen(msgq.msg));
+		else
 		{
-			write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
-			queue_stale = queue_head;
-			queue_head = queue_head->next;
-			free(queue_stale);
-			if (queue_stale == queue_tail)
-			{
-				queue_head = NULL;
-				queue_tail = NULL;
-			}
+			fprintf(stderr, "msgrcv failed with error: %s\n", 
+			    strerror(errno));
+			exit(EXIT_FAILURE);
 		}
-		pthread_mutex_unlock(&lock);
-		
-		sleep(WRITEOUT_PERIOD);
 	}
 	
 	return NULL;
@@ -195,7 +165,8 @@ int  main(void)
 {
 	int  iret1;
 	int broadcast;
-	pthread_t sensor_sample;
+	pthread_t write_file_thread_handle;
+	int msgqkey = MSG_QUEUE_KEY;
 
 	printf("RTILogger Launch...\r\n");
 
@@ -210,8 +181,12 @@ int  main(void)
 	bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	// Initialize sensors
-	status.file_open_txt = 0;
+	strcpy(status.filename_txt, FILE_NAME_TXT);
+	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_WRONLY, S_IWUSR);
 	status.file_idx_txt = 0;
+	
+	// Initialize message queue
+	msgqid = msgget(msgqkey, 0660 | IPC_CREAT);
 
 	iret1 = pthread_mutex_init(&lock, NULL); 
 	if(iret1)
@@ -221,7 +196,7 @@ int  main(void)
 	}
 
 	/* Initialize the threads */
-	iret1 = pthread_create( &sensor_sample, NULL, thread_write_file, NULL);
+	iret1 = pthread_create( &write_file_thread_handle, NULL, thread_write_file, NULL);
 	if(iret1)
 	{
 		printf("Error - pthread_create() return code: %d\n",iret1);
@@ -240,7 +215,8 @@ int  main(void)
 	
 	// Exit	
 	tp_stop_handlers();
-	pthread_join(sensor_sample, NULL);
+	pthread_join(write_file_thread_handle, NULL);
+	close(status.file_txt_desc);
 	pthread_mutex_destroy(&lock);
 
 	return 0;
