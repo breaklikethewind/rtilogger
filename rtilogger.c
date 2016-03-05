@@ -82,12 +82,12 @@ int logtxt(char* request, char* response);
 int app_exit(char* request, char* response);
 
 pushlist_t pushlist[] = { 
-{ "LOGTXTIDX",    TYPE_FLOAT,   &status.file_idx_txt},
+{ "LOGTXTIDX",    TYPE_INTEGER, &status.file_idx_txt},
 { "",             TYPE_NULL,    NULL} 
 };
 
 commandlist_t device_commandlist[] = { 
-{ "LOGTXT",          "LOGTXTIDX",    &logtxt,       TYPE_FLOAT,   &status.file_idx_txt},
+{ "LOGTXT",          "LOGTXTIDX",    &logtxt,       TYPE_INTEGER, &status.file_idx_txt},
 { "GETTXTIDX",       "LOGTXTIDX",    NULL,          TYPE_INTEGER, &status.file_idx_txt},
 { "EXIT",            "EXIT",         &app_exit,     TYPE_INTEGER, &exitflag},
 { "",                "",             NULL,          TYPE_NULL,    NULL}
