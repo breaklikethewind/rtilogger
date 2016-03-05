@@ -127,6 +127,8 @@ int logtxt(char* type, char* request, char* response)
 	int error = 0;
 	char time_s[25];
 	
+	msgq.msg_type = 1;
+	
 	t = time(NULL);
 	tm = *localtime(&t);
 
@@ -137,7 +139,7 @@ int logtxt(char* type, char* request, char* response)
 		sprintf(msgq.msg, "%05u | %s | %8s | %s \n", status.file_idx_txt, time_s, type, request);
 		if (msgsnd(msgqid, (void *)&msgq, strlen(msgq.msg) + 1 , 0) == -1) 
 		{
-		    printf("msgsnd failed\n");
+		    printf("msgsnd failed %u:%s\n", errno, strerror(errno));
 		    error = -1;
 		}		
 	
@@ -172,8 +174,8 @@ void *thread_write_file( void *ptr )
 			write(status.file_txt_desc, msgq.msg, strlen(msgq.msg));
 		else
 		{
-			fprintf(stderr, "msgrcv failed with error: %s\n", 
-			    strerror(errno));
+			fprintf(stderr, "msgrcv failed with error: %u:%s\n", 
+			    errno, strerror(errno));
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -207,17 +209,27 @@ int  main(void)
 	bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	// Initialize sensors
-	strcpy(status.filename_txt, FILE_NAME_TXT);
-	status.file_txt_desc = open(status.filename_txt, O_APPEND | O_WRONLY, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH);
 	status.file_idx_txt = 0;
+	strcpy(status.filename_txt, FILE_NAME_TXT);
+	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_APPEND | O_WRONLY, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH);
+	if (status.file_txt_desc < 0)
+	{
+		printf("Error - Text file open failed, return code: %d, %u:%s\n", status.file_txt_desc, errno, strerror(errno));
+		return -1;
+	}
 	
 	// Initialize message queue
 	msgqid = msgget(msgqkey, 0660 | IPC_CREAT);
+	if (msgqid < 0)
+	{
+		printf("Error - msgget failed, return code: %d, %u:%s\n", msgqid, errno, strerror(errno));
+		return -1;
+	}
 
 	iret1 = pthread_mutex_init(&lock, NULL); 
 	if(iret1)
 	{
-		printf("Error - mutex init failed, return code: %d\n",iret1);
+		printf("Error - mutex init failed, return code: %d, %u:%s\n",iret1, errno, strerror(errno));
 		return -1;
 	}
 
@@ -225,7 +237,7 @@ int  main(void)
 	iret1 = pthread_create( &write_file_thread_handle, NULL, thread_write_file, NULL);
 	if(iret1)
 	{
-		printf("Error - pthread_create() return code: %d\n",iret1);
+		printf("Error - pthread_create() return code: %d, %u:%s\n",iret1, errno, strerror(errno));
  		return -2;
 	}
 	else

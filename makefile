@@ -1,5 +1,5 @@
 
-CC=gcc
+CC=/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-gcc
 CFLAGS=-c -Wall
 LDFLAGS=-pthread
 SOURCES=rtilogger.c transport.c 
