@@ -1,10 +1,15 @@
 
 rtilogger monitoring software written by Eric Nelson
 
-This program uses a raspberry pi to log debug messages. That data is sent to 
+This program uses a synology NAS to log debug messages. That data is sent to 
 an RTI XP processor for display to the user.
 
 The files are:
+
+rtilogger.c
+This is the entry point. This file manages capture & sending of app
+level messages. This app opens a text file to log all captured data.
+Futuer versions will add the ability to push the data to a mySQL database.
 
 transport.c
 This controls the communication to the RTI processor. The communciation
