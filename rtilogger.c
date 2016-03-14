@@ -37,116 +37,119 @@
 #include <signal.h>
 
 #include <sys/socket.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <netinet/in.h>
 
 #include "transport.h"
 
-#define WRITEOUT_PERIOD 5 // Seconds
+/* This is unique per application instance and RTI driver instance */
+#define RTI_UDP_PORT 32004
+#define MAX_LOGMSG_BYTES 256
+#define FILE_NAME_TXT "RTI_Logfile.txt"
+#define MSG_QUEUE_KEY 1
 
 struct sockaddr_in servaddr;
 
 int sockfd;
 int rtiUdpPort;
-/* This is unique per application instance and RTI driver instance */
-#define RTI_UDP_PORT 32004
 
 typedef struct
 {
-	int file_open_txt;
 	int file_idx_txt;
 	int file_txt_desc;
-	char filename_txt[256];
+	char filename_txt[1024];
 } status_t;
 
-struct queue_entry_t
-{
-	char buf[256];
-	struct queue_entry_t* next;
-};
+struct msg_queue_st {
+    long int msg_type;
+    char msg[MAX_LOGMSG_BYTES];
+}; 
 
-struct queue_entry_t* queue_tail;
-struct queue_entry_t* queue_head;
+int msgqid;
+
 status_t status;
 int exitflag = 0;
 pthread_mutex_t lock; // sync between UDP thread and main
 commandlist_t command_list;
 
-void write_queue_to_file(void);
 void *thread_write_file( void *ptr );
 
 typedef int (*cmdfunc)(char* request, char* response);
 
-int opentxtfile(char* request, char* response);
-int closetxtfile(char* request, char* response);
-int logtxt(char* request, char* response);
+int logtxtsecurity(char* request, char* response);
+int logtxtwx(char* request, char* response);
+int logtxtclimate(char* request, char* response);
+int logtxtstatus(char* request, char* response);
+int logtxt(char* type, char* request, char* response);
 int app_exit(char* request, char* response);
 
 pushlist_t pushlist[] = { 
-{ "TXTFILEOPEN",  TYPE_FLOAT,   &status.file_open_txt}, 
-{ "LOGTXT",       TYPE_FLOAT,   &status.file_idx_txt},
+{ "LOGTXTIDX",    TYPE_INTEGER, &status.file_idx_txt},
 { "",             TYPE_NULL,    NULL} 
 };
 
 commandlist_t device_commandlist[] = { 
-{ "OPENTXTFILE",     "TXTFILEOPEN",  &opentxtfile,  TYPE_FLOAT,   NULL}, 
-{ "CLOSETXTFILE",    "TXTFILEOPEN",  &closetxtfile, TYPE_FLOAT,   NULL}, 
-{ "LOGTXT",          "LOGTXT",       &logtxt,       TYPE_FLOAT,   &status.file_idx_txt},
-{ "GETIDXTXT",       "IDXTXT",       NULL,          TYPE_INTEGER, &status.file_idx_txt},
-{ "EXIT",            "EXIT",         &app_exit,     TYPE_INTEGER, &exitflag},
-{ "",                "",             NULL,          TYPE_NULL,    NULL}
+{ "LOGTXTSECURITY",  "LOGTXTIDX",    &logtxtsecurity, TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTWX",        "LOGTXTIDX",    &logtxtwx,       TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTCLIMATE",   "LOGTXTIDX",    &logtxtclimate,  TYPE_INTEGER, &status.file_idx_txt},
+{ "LOGTXTSTATUS",    "LOGTXTIDX",    &logtxtstatus,   TYPE_INTEGER, &status.file_idx_txt},
+{ "GETTXTIDX",       "LOGTXTIDX",    NULL,            TYPE_INTEGER, &status.file_idx_txt},
+{ "EXIT",            "EXIT",         &app_exit,       TYPE_INTEGER, &exitflag},
+{ "",                "",             NULL,            TYPE_NULL,    NULL}
 };
 
-int opentxtfile(char* request, char* response)
+int logtxtsecurity(char* request, char* response)
 {
-	strncpy(status.filename_txt, request, 255);
-	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_WRONLY, S_IWUSR);
-	
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0);
-	
-	return 0;
+	return logtxt("Security", request, response);
 }
 
-int closetxtfile(char* request, char* response)
+int logtxtwx(char* request, char* response)
 {
-	write_queue_to_file(); // flush the queue
-	close(status.file_txt_desc);
-	status.file_txt_desc = 0;
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); // I know, this will always be 0
-	
-	return 0;
+	return logtxt("Weather", request, response);
 }
 
-int logtxt(char* request, char* response)
+int logtxtclimate(char* request, char* response)
+{
+	return logtxt("Climate", request, response);
+}
+
+int logtxtstatus(char* request, char* response)
+{
+	return logtxt("Status", request, response);
+}
+
+int logtxt(char* type, char* request, char* response)
 {
 	time_t t;
 	struct tm tm;
+	struct msg_queue_st msgq;
+	int error = 0;
 	char time_s[25];
+	
+	msgq.msg_type = 1;
 	
 	t = time(NULL);
 	tm = *localtime(&t);
 
-	sprintf(time_s, "%d-%d-%d %d:%d:%d\n", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(time_s, "%02d-%02d-%04d | %02d:%02d:%02d", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	if (status.file_txt_desc) 
-	{
+	{		
+		sprintf(msgq.msg, "%05u | %s | %8s | %s \n", status.file_idx_txt, time_s, type, request);
+		if (msgsnd(msgqid, (void *)&msgq, strlen(msgq.msg) + 1 , 0) == -1) 
+		{
+		    printf("msgsnd failed %u:%s\n", errno, strerror(errno));
+		    error = -1;
+		}		
+	
 		pthread_mutex_lock(&lock);
-		if (queue_tail)
-		{
-			queue_tail->next = malloc(sizeof(struct queue_entry_t));
-			queue_tail = queue_tail->next;
-		}
-		else
-		{
-			queue_tail = malloc(sizeof(struct queue_entry_t));
-			queue_head = queue_tail;
-		}
-		queue_tail->next = NULL;
-		sprintf(queue_tail->buf, "%s: %s", time_s, request);
+		status.file_idx_txt++;
 		pthread_mutex_unlock(&lock);
 	}
-	sprintf(response, "%u", (status.file_txt_desc) ? 1:0); 
+	sprintf(response, "%u", status.file_idx_txt); 
 	
-	return 0;
+	return error;
 }
 
 int app_exit(char* request, char* response)
@@ -159,31 +162,22 @@ int app_exit(char* request, char* response)
 	return 0;
 }
 
-void write_queue_to_file(void)
-{
-	struct queue_entry_t* queue_stale;
-
-	// Fetch file queue data
-	pthread_mutex_lock(&lock);		
-	while (queue_head)
-	{
-		write(status.file_txt_desc, queue_head->buf, strlen(queue_head->buf));
-		queue_stale = queue_head;
-		queue_head = queue_head->next;
-		free(queue_stale);
-		if (queue_head == NULL)
-			queue_tail = NULL;
-	}
-	pthread_mutex_unlock(&lock);
-}
-
 void *thread_write_file( void *ptr ) 
 {
+	struct msg_queue_st msgq;
+	long int msg_to_receive = 0;
 	
 	while (!exitflag)
 	{
-		write_queue_to_file();
-		sleep(WRITEOUT_PERIOD);
+		// Fetch file queue data (blocking)
+		if (msgrcv(msgqid, (void *)&msgq, MAX_LOGMSG_BYTES, msg_to_receive, 0) != -1) 
+			write(status.file_txt_desc, msgq.msg, strlen(msgq.msg));
+		else
+		{
+			fprintf(stderr, "msgrcv failed with error: %u:%s\n", 
+			    errno, strerror(errno));
+			exit(EXIT_FAILURE);
+		}
 	}
 	
 	return NULL;
@@ -195,12 +189,19 @@ void *thread_write_file( void *ptr )
  *********************************************************************************
  */
 
-int  main(void)
+int  main(int argc, char *argv[])
 {
 	int  iret1;
 	int broadcast;
-	pthread_t sensor_sample;
+	pthread_t write_file_thread_handle;
+	int msgqkey = MSG_QUEUE_KEY;
 
+	if (argc < 2)
+	{
+		printf("Must enter text log file name!\n");
+		return -1;
+	}
+	
 	printf("RTILogger Launch...\r\n");
 
 	/* Set up the socket */
@@ -214,21 +215,36 @@ int  main(void)
 	bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	// Initialize sensors
-	status.file_open_txt = 0;
 	status.file_idx_txt = 0;
+	   
+	strcpy(status.filename_txt, argv[1]);
+	status.file_txt_desc = open(status.filename_txt, O_CREAT | O_APPEND | O_WRONLY, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH);
+	if (status.file_txt_desc < 0)
+	{
+		printf("Error - Text file open failed, return code: %d, %u:%s\n", status.file_txt_desc, errno, strerror(errno));
+		return -1;
+	}
+	
+	// Initialize message queue
+	msgqid = msgget(msgqkey, 0660 | IPC_CREAT);
+	if (msgqid < 0)
+	{
+		printf("Error - msgget failed, return code: %d, %u:%s\n", msgqid, errno, strerror(errno));
+		return -1;
+	}
 
 	iret1 = pthread_mutex_init(&lock, NULL); 
 	if(iret1)
 	{
-		printf("Error - mutex init failed, return code: %d\n",iret1);
+		printf("Error - mutex init failed, return code: %d, %u:%s\n",iret1, errno, strerror(errno));
 		return -1;
 	}
 
 	/* Initialize the threads */
-	iret1 = pthread_create( &sensor_sample, NULL, thread_write_file, NULL);
+	iret1 = pthread_create( &write_file_thread_handle, NULL, thread_write_file, NULL);
 	if(iret1)
 	{
-		printf("Error - pthread_create() return code: %d\n",iret1);
+		printf("Error - pthread_create() return code: %d, %u:%s\n",iret1, errno, strerror(errno));
  		return -2;
 	}
 	else
@@ -244,7 +260,8 @@ int  main(void)
 	
 	// Exit	
 	tp_stop_handlers();
-	pthread_join(sensor_sample, NULL);
+	pthread_join(write_file_thread_handle, NULL);
+	close(status.file_txt_desc);
 	pthread_mutex_destroy(&lock);
 
 	return 0;
