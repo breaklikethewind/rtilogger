@@ -39,6 +39,8 @@
 #include <sys/socket.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 
 #include "transport.h"
@@ -254,7 +256,8 @@ int  main(int argc, char *argv[])
 	
 	tp_handle_data_push(pushlist, &lock);
 
-	while (!exitflag) sleep(0);
+	waitpid(-1, NULL, 0); // Wait for any child process to terminate
+	exitflag = 1;
 	
 	printf("RTILogger Exit Set...\r\n");
 	
