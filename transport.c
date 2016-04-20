@@ -127,10 +127,20 @@ void tp_stop_handlers()
 	pthread_join(push_thread, NULL);
 }
 
+int tp_join()
+{
+	pthread_join(request_thread, NULL);
+	pthread_join(push_thread, NULL);
+
+	return 0;
+}
+
 int tp_handle_requests(commandlist_t* device_commandlist, pthread_mutex_t* lock)
 {
 	int i, j;
 	int err;
+
+	transport.exit = 0;
 
 	// merge device command list, and transport command list
 	i = 0;
