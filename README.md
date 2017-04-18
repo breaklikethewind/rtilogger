@@ -1,8 +1,7 @@
-
 rtilogger monitoring software written by Eric Nelson
 
-This program uses a synology NAS to log debug messages. That data is sent to 
-an RTI XP processor for display to the user.
+This program uses a synology NAS (or any Linux box) to log debug messages. 
+That data is sent to an RTI XP processor for display to the user.
 
 The files are:
 
