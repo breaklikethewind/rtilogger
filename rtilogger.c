@@ -256,9 +256,7 @@ int  main(int argc, char *argv[])
 	
 	tp_handle_data_push(pushlist, &lock);
 
-	// waitpid(-1, NULL, 0); // Wait for any child process to terminate
-	tp_join();
-	exitflag = 1;
+	while (!exitflag) sleep(0);
 	
 	printf("RTILogger Exit Set...\r\n");
 	

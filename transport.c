@@ -127,20 +127,10 @@ void tp_stop_handlers()
 	pthread_join(push_thread, NULL);
 }
 
-int tp_join()
-{
-	pthread_join(request_thread, NULL);
-	pthread_join(push_thread, NULL);
-
-	return 0;
-}
-
 int tp_handle_requests(commandlist_t* device_commandlist, pthread_mutex_t* lock)
 {
 	int i, j;
 	int err;
-
-	transport.exit = 0;
 
 	// merge device command list, and transport command list
 	i = 0;
@@ -286,7 +276,8 @@ void *thread_data_push(void *ptr)
 
 	memset(&alladdr, 0, sizeof(alladdr));
 	alladdr.sin_family = AF_INET;
-	alladdr.sin_addr.s_addr = inet_addr("192.168.1.255");
+//	alladdr.sin_addr.s_addr = inet_addr("192.168.1.255");
+	alladdr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 	alladdr.sin_port = htons(rtiUdpPort);
 
 	pushlist = (pushlist_t*)ptr;
