@@ -256,8 +256,10 @@ int  main(int argc, char *argv[])
 	
 	tp_handle_data_push(pushlist, &lock);
 
-	while (!exitflag) sleep(0);
-	
+	//while (!exitflag) sleep(0);
+	tp_join();
+	exitflag = 1;
+
 	printf("RTILogger Exit Set...\r\n");
 	
 	// Exit	

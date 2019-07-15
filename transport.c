@@ -123,14 +123,23 @@ void tp_stop_handlers()
 	sendto(sockfd, sendmesg, sizeof(sendmesg), 0, (struct sockaddr *)&alladdr, sizeof(alladdr));
 	
 	transport.exit = 1;
+	tp_join();
+}
+
+int tp_join()
+{
 	pthread_join(request_thread, NULL);
 	pthread_join(push_thread, NULL);
+
+	return 0;
 }
 
 int tp_handle_requests(commandlist_t* device_commandlist, pthread_mutex_t* lock)
 {
 	int i, j;
 	int err;
+
+	transport.exit = 0; // Initialize for first use
 
 	// merge device command list, and transport command list
 	i = 0;
